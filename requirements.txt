@@ -1,0 +1,7 @@
+gradio
+pypdf
+nltk
+sentence-transformers
+faiss-cpu
+google-generativeai
+numpy
