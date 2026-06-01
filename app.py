@@ -1,5 +1,5 @@
 import gradio as gr
-import re, numpy as np, io
+import re, numpy as np
 
 # ---------- pipeline functions ----------
 
@@ -63,60 +63,82 @@ def run_future_work(t, k):
 def run_interview(t, k):
     return gemini_call(f"Generate 10 technical interview Q&A. Include Conceptual, Architecture, Methodology, Practical questions.\n\nPaper:\n{t[:30000]}", k)
 
-# ---------- state ----------
-STATE = {}
-
 # ---------- handlers ----------
 
-def process_paper(api_key, pdf_path):
+def process_paper(api_key, pdf_path, state):
+    """Process uploaded PDF and store all data in per-user session state."""
     if not api_key:
-        return "Please enter your Gemini API key."
+        return "Please enter your Gemini API key.", state
     if pdf_path is None:
-        return "Please upload a PDF."
+        return "Please upload a PDF.", state
+
     import nltk
     try:    nltk.data.find("tokenizers/punkt_tab")
     except: nltk.download("punkt_tab", quiet=True)
     from nltk.tokenize import sent_tokenize
+
     raw, n_pages = extract_pdf_text(pdf_path)
     if n_pages > 30:
-        return f"PDF has {n_pages} pages. Max 30 allowed."
+        return f"PDF has {n_pages} pages. Max 30 allowed.", state
+
     cleaned = clean_text(raw)
     chunks  = create_sentence_chunks(sent_tokenize(cleaned))
     model   = get_embedding_model()
     idx     = build_faiss_index(chunks, model)
-    STATE["cleaned"] = cleaned
-    STATE["chunks"]  = chunks
-    STATE["idx"]     = idx
-    STATE["model"]   = model
-    STATE["key"]     = api_key
-    return f"Ready! {n_pages} pages · {len(chunks)} chunks indexed in FAISS."
 
-def check_ready():
-    if not STATE.get("cleaned"):
+    # Build state AFTER all variables exist — stored per user session, never globally
+    state = {
+        "cleaned": cleaned,
+        "chunks":  chunks,
+        "idx":     idx,
+        "model":   model,
+        "key":     api_key,   # key lives only in this user's session object
+    }
+
+    return f"Ready! {n_pages} pages · {len(chunks)} chunks indexed in FAISS.", state
+
+
+def check_ready(state):
+    """Return an error string if the paper hasn't been processed yet, else None."""
+    if not state or not state.get("cleaned"):
         return "Process a paper first."
     return None
 
-def btn_summary():
-    err = check_ready(); return err or run_summary(STATE["cleaned"], STATE["key"])
-def btn_methodology():
-    err = check_ready(); return err or run_methodology(STATE["cleaned"], STATE["key"])
-def btn_datasets():
-    err = check_ready(); return err or run_datasets(STATE["cleaned"], STATE["key"])
-def btn_results():
-    err = check_ready(); return err or run_results(STATE["cleaned"], STATE["key"])
-def btn_limitations():
-    err = check_ready(); return err or run_limitations(STATE["cleaned"], STATE["key"])
-def btn_future_work():
-    err = check_ready(); return err or run_future_work(STATE["cleaned"], STATE["key"])
-def btn_interview():
-    err = check_ready(); return err or run_interview(STATE["cleaned"], STATE["key"])
 
-def btn_ask(question):
-    err = check_ready()
+def btn_summary(state):
+    err = check_ready(state)
+    return err or run_summary(state["cleaned"], state["key"])
+
+def btn_methodology(state):
+    err = check_ready(state)
+    return err or run_methodology(state["cleaned"], state["key"])
+
+def btn_datasets(state):
+    err = check_ready(state)
+    return err or run_datasets(state["cleaned"], state["key"])
+
+def btn_results(state):
+    err = check_ready(state)
+    return err or run_results(state["cleaned"], state["key"])
+
+def btn_limitations(state):
+    err = check_ready(state)
+    return err or run_limitations(state["cleaned"], state["key"])
+
+def btn_future_work(state):
+    err = check_ready(state)
+    return err or run_future_work(state["cleaned"], state["key"])
+
+def btn_interview(state):
+    err = check_ready(state)
+    return err or run_interview(state["cleaned"], state["key"])
+
+
+def btn_ask(question, state):
+    err = check_ready(state)
     if err: return err
     if not question.strip(): return "Type a question first."
 
-    # broad queries -> send full paper text so Gemini always has enough context
     broad = ["summary", "summarize", "overview", "methodology", "method", "dataset",
              "data", "results", "result", "limitations", "limitation", "future",
              "contribution", "conclusion", "introduction", "abstract",
@@ -126,10 +148,11 @@ def btn_ask(question):
     use_full = any(kw in question.lower() for kw in broad)
 
     if use_full:
-        context = STATE["cleaned"][:30000]
+        context = state["cleaned"][:30000]
     else:
-        # specific narrow query -> FAISS top 7
-        context = "\n\n".join(search_chunks(question, STATE["model"], STATE["idx"], STATE["chunks"], k=7))
+        context = "\n\n".join(
+            search_chunks(question, state["model"], state["idx"], state["chunks"], k=7)
+        )
 
     prompt = f"""You are a research paper assistant.
 Answer the question using the paper content provided below.
@@ -141,40 +164,59 @@ Paper Content:
 Question: {question}
 
 Answer:"""
-    return gemini_call(prompt, STATE["key"])
+    return gemini_call(prompt, state["key"])
+
 
 # ---------- UI ----------
 
 with gr.Blocks(title="AI Research Paper Assistant") as demo:
     gr.Markdown("# AI Research Paper Assistant")
+    gr.Markdown(
+        "> 🔒 **Privacy note:** Your API key is stored only in your browser session "
+        "and is never saved to any server or database."
+    )
+
+    # Per-user session state — each browser tab gets its own isolated dict
+    user_state = gr.State({})
 
     with gr.Row():
-        api_key_box = gr.Textbox(label="Gemini API Key", type="password", placeholder="AIza...")
-        pdf_box     = gr.File(label="Upload PDF (max 30 pages)", file_types=[".pdf"])
+        api_key_box = gr.Textbox(
+            label="Gemini API Key", type="password", placeholder="AIza..."
+        )
+        pdf_box = gr.File(label="Upload PDF (max 30 pages)", file_types=[".pdf"])
 
     process_btn    = gr.Button("Process Paper", variant="primary")
     process_status = gr.Textbox(label="Status", interactive=False)
-    process_btn.click(fn=process_paper, inputs=[api_key_box, pdf_box], outputs=[process_status])
+
+    # process_paper now returns (status_text, updated_state)
+    process_btn.click(
+        fn=process_paper,
+        inputs=[api_key_box, pdf_box, user_state],
+        outputs=[process_status, user_state],
+    )
 
     gr.Markdown("---")
     gr.Markdown("### Analysis")
     output_box = gr.Markdown()
 
     with gr.Row():
-        gr.Button("Summary").click(fn=btn_summary, outputs=[output_box])
-        gr.Button("Methodology").click(fn=btn_methodology, outputs=[output_box])
-        gr.Button("Datasets").click(fn=btn_datasets, outputs=[output_box])
-        gr.Button("Results").click(fn=btn_results, outputs=[output_box])
+        gr.Button("Summary").click(fn=btn_summary,     inputs=[user_state], outputs=[output_box])
+        gr.Button("Methodology").click(fn=btn_methodology, inputs=[user_state], outputs=[output_box])
+        gr.Button("Datasets").click(fn=btn_datasets,   inputs=[user_state], outputs=[output_box])
+        gr.Button("Results").click(fn=btn_results,     inputs=[user_state], outputs=[output_box])
 
     with gr.Row():
-        gr.Button("Limitations").click(fn=btn_limitations, outputs=[output_box])
-        gr.Button("Future Work").click(fn=btn_future_work, outputs=[output_box])
-        gr.Button("Interview Q&A").click(fn=btn_interview, outputs=[output_box])
+        gr.Button("Limitations").click(fn=btn_limitations,  inputs=[user_state], outputs=[output_box])
+        gr.Button("Future Work").click(fn=btn_future_work,  inputs=[user_state], outputs=[output_box])
+        gr.Button("Interview Q&A").click(fn=btn_interview,  inputs=[user_state], outputs=[output_box])
 
     gr.Markdown("---")
     gr.Markdown("### Ask a Question")
-    question_box = gr.Textbox(label="Your question", placeholder="e.g. Give me summary / What dataset was used?")
-    ask_btn      = gr.Button("Ask", variant="primary")
-    ask_btn.click(fn=btn_ask, inputs=[question_box], outputs=[output_box])
+    question_box = gr.Textbox(
+        label="Your question",
+        placeholder="e.g. Give me summary / What dataset was used?"
+    )
+    ask_btn = gr.Button("Ask", variant="primary")
+    ask_btn.click(fn=btn_ask, inputs=[question_box, user_state], outputs=[output_box])
 
-demo.launch(share=True)
+demo.launch()
