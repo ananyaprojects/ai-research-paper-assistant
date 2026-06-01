@@ -2,6 +2,10 @@
 
 A RAG-powered tool that lets you upload any research paper (PDF) and instantly get structured analysis — summaries, methodology breakdowns, dataset extraction, results, limitations, and more — using semantic search and Gemini 2.5 Flash.
 
+
+https://github.com/user-attachments/assets/d8c2c324-26c1-486b-91d0-0a73b209d273
+
+
 ---
 
 ## What It Does
