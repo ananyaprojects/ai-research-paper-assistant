@@ -1,6 +1,7 @@
 
 
 **How it actually works:**
+https://mybinder.org/v2/gh/ananyaprojects/ai-research-paper-assistant/064c4c055de24f8665cd4cfe5ae54fd048863c43?urlpath=lab%2Ftree%2FAI_RESEARCH_PAPER_ASSISTANT_fixed.ipynb
 
 When you upload a research paper PDF, the tool first extracts all the raw text from every page using a PDF reader. That text is then cleaned — extra spaces, broken lines, formatting noise — all removed so the content is readable.
 
