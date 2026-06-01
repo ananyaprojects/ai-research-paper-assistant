@@ -106,15 +106,6 @@ The app will launch locally at `http://127.0.0.1:7860` and also generate a publi
 
 ---
 
-## Deploy on Hugging Face Spaces (Free)
-
-1. Go to [huggingface.co/spaces](https://huggingface.co/spaces) → New Space
-2. Choose **Gradio** as the SDK
-3. Upload `app.py` and `requirements.txt`
-4. Your app will be live at `https://huggingface.co/spaces/YOUR_USERNAME/ai-research-paper-assistant`
-
----
-
 ## Project Structure
 
 ```
